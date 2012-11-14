@@ -1,7 +1,15 @@
 #!/usr/bin/python
 # Based on miniterm sample in pyserial
 
-import sys, os, serial, threading, traceback, time
+import sys
+import os
+import serial
+import threading
+import traceback
+import time
+import colorama
+
+colorama.init()
 
 if os.name == 'nt':
     import msvcrt
@@ -48,33 +56,38 @@ else:
            "available." % sys.platform)
 
 class Miniterm:
+    """Normal interactive terminal"""
+
     def __init__(self, serial):
         self.serial = serial
+        self.threads = []
 
     def start(self):
         self.alive = True
-        #start serial->console thread
-        self.receiver_thread = threading.Thread(target=self.reader)
-        self.receiver_thread.daemon = True
-        self.receiver_thread.start()
-        #enter console->serial loop
+        # serial->console
+        self.threads.append(threading.Thread(target=self.reader))
+        # console->serial
         self.console = Console()
-        self.transmitter_thread = threading.Thread(target=self.writer)
-        self.transmitter_thread.daemon = True
-        self.transmitter_thread.start()
+        self.threads.append(threading.Thread(target=self.writer))
+        # start them
+        for thread in self.threads:
+            thread.daemon = True
+            thread.start()
 
     def stop(self):
         self.alive = False
 
-    def join(self, transmit_only=False):
-        self.receiver_thread.join()
-        self.transmitter_thread.join()
+    def join(self):
+        for thread in self.threads:
+            thread.join()
 
     def reader(self):
         """loop and copy serial->console"""
         try:
             while self.alive:
                 data = self.serial.read(1)
+                if not data:
+                    continue
                 sys.stdout.write(data)
                 sys.stdout.flush()
         except Exception as e:
@@ -118,17 +131,27 @@ class Miniterm:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Simple serial terminal")
+    parser = argparse.ArgumentParser(description="Simple serial terminal.  "
+                                     "If two devices are provided, output from "
+                                     "the first is shown in yellow, second in "
+                                     "cyan, and input is discarded.")
     parser.add_argument('device', metavar='DEVICE',
-                        help='serial device')
+                        help='serial device 1')
     parser.add_argument('baudrate', metavar='BAUDRATE', type=int, nargs='?',
-                        help='baud rate', default=115200)
+                        help='baud rate 1', default=115200)
+    parser.add_argument('device2', metavar="DEVICE2", nargs='?',
+                        help='serial device 2', default=None)
+    parser.add_argument('baudrate2', metavar='BAUDRATE2', type=int, nargs='?',
+                        help='baud rate 2', default=115200)
     args = parser.parse_args()
     try:
         dev = serial.Serial(args.device, args.baudrate)
     except serial.serialutil.SerialException:
         sys.stderr.write("error opening %s\n" % args.device)
         raise SystemExit(1)
+    print args.device + ", " + str(args.baudrate) + " baud"
+    print "^C to exit"
+    print "--"
     term = Miniterm(dev)
     term.run()
 
