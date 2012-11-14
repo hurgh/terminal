@@ -7,9 +7,33 @@ import serial
 import threading
 import traceback
 import time
-import colorama
+import re
 
-colorama.init()
+class Color(object):
+    def __init__(self):
+        self.total = 1
+        self.codes = [""]
+        self.reset = ""
+    def setup(self, total):
+        self.total = total
+        # Initialize colorama, if needed for the total number of devices
+        # we have.  We avoid even loading colorama unless we need it.
+        if total > 1:
+            import colorama
+            colorama.init()
+            self.codes = [
+                colorama.Fore.CYAN + colorama.Style.BRIGHT,
+                colorama.Fore.YELLOW + colorama.Style.BRIGHT,
+                colorama.Fore.MAGENTA + colorama.Style.BRIGHT,
+                colorama.Fore.RED + colorama.Style.BRIGHT,
+                colorama.Fore.GREEN + colorama.Style.BRIGHT,
+                colorama.Fore.BLUE + colorama.Style.BRIGHT,
+                colorama.Fore.WHITE + colorama.Style.BRIGHT,
+                ]
+            self.reset = colorama.Style.RESET_ALL
+    def code(self, n):
+        return self.codes[n % self.total]
+color = Color()
 
 if os.name == 'nt':
     import msvcrt
@@ -58,8 +82,9 @@ else:
 class Miniterm:
     """Normal interactive terminal"""
 
-    def __init__(self, serial):
+    def __init__(self, serial, suppress_bytes = None):
         self.serial = serial
+        self.suppress_bytes = suppress_bytes or ""
         self.threads = []
 
     def start(self):
@@ -112,6 +137,9 @@ class Miniterm:
                     time.sleep(0.25)
                     self.stop()
                     return
+                elif c in self.suppress_bytes:
+                    # Don't send these bytes
+                    continue
                 else:
                     self.serial.write(c)                    # send character
         except Exception as e:
@@ -131,27 +159,46 @@ class Miniterm:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Simple serial terminal.  "
-                                     "If two devices are provided, output from "
-                                     "the first is shown in yellow, second in "
-                                     "cyan, and input is discarded.")
-    parser.add_argument('device', metavar='DEVICE',
-                        help='serial device 1')
-    parser.add_argument('baudrate', metavar='BAUDRATE', type=int, nargs='?',
-                        help='baud rate 1', default=115200)
-    parser.add_argument('device2', metavar="DEVICE2", nargs='?',
-                        help='serial device 2', default=None)
-    parser.add_argument('baudrate2', metavar='BAUDRATE2', type=int, nargs='?',
-                        help='baud rate 2', default=115200)
+    formatter = argparse.ArgumentDefaultsHelpFormatter
+    description = ("Simple serial terminal that supports multiple devices.  "
+                   "If more than one device is specified, device output is "
+                   "shown in varying colors.  All input goes to the "
+                   "first device.")
+    parser = argparse.ArgumentParser(description = description,
+                                     formatter_class = formatter)
+
+    parser.add_argument("--baudrate", "-b", metavar="BAUD", type=int,
+                        help="baudrate for all devices", default=115200)
+    parser.add_argument("--quiet", "-q", action="store_true",
+                        help="Less verbose output")
+    parser.add_argument("device", metavar="DEVICE", nargs="+",
+                        help="serial device.  Specify DEVICE@BAUD for "
+                        "per-device baudrates.")
+
     args = parser.parse_args()
-    try:
-        dev = serial.Serial(args.device, args.baudrate)
-    except serial.serialutil.SerialException:
-        sys.stderr.write("error opening %s\n" % args.device)
-        raise SystemExit(1)
-    print args.device + ", " + str(args.baudrate) + " baud"
-    print "^C to exit"
-    print "--"
+
+    devs = []
+    color.setup(len(args.device))
+    for (n, device) in enumerate(args.device):
+        m = re.search(r"^(.*)@([1-9][0-9]*)$", device)
+        if m is not None:
+            node = m.group(1)
+            baud = m.group(2)
+        else:
+            node = device
+            baud = args.baudrate
+        try:
+            dev = serial.Serial(node, baud)
+        except serial.serialutil.SerialException:
+            sys.stderr.write("error opening %s\n" % node)
+            raise SystemExit(1)
+        if not args.quiet:
+            print color.code(n) + node + ", " + str(args.baudrate) + " baud"
+        devs.append(dev)
+
+    if not args.quiet:
+        print color.reset + "^C to exit"
+        print color.reset + "--"
     term = Miniterm(dev)
     term.run()
 
