@@ -44,7 +44,8 @@ elif os.name == 'posix':
             c = os.read(self.fd, 1)
             return c
 else:
-    raise "Sorry, no terminal implementation for your platform (%s) available." % sys.platform
+    raise ("Sorry, no terminal implementation for your platform (%s) "
+           "available." % sys.platform)
 
 class Miniterm:
     def __init__(self, serial):
@@ -54,12 +55,12 @@ class Miniterm:
         self.alive = True
         #start serial->console thread
         self.receiver_thread = threading.Thread(target=self.reader)
-        self.receiver_thread.setDaemon(1)
+        self.receiver_thread.daemon = True
         self.receiver_thread.start()
         #enter console->serial loop
         self.console = Console()
         self.transmitter_thread = threading.Thread(target=self.writer)
-        self.transmitter_thread.setDaemon(1)
+        self.transmitter_thread.daemon = True
         self.transmitter_thread.start()
 
     def stop(self):
@@ -112,6 +113,7 @@ class Miniterm:
         self.join()
         print ""
         self.console.cleanup()
+        self.serial.timeout = saved_timeout
 
 if __name__ == "__main__":
     import argparse
@@ -122,6 +124,11 @@ if __name__ == "__main__":
     parser.add_argument('baudrate', metavar='BAUDRATE', type=int, nargs='?',
                         help='baud rate', default=115200)
     args = parser.parse_args()
-    term = Miniterm(serial.Serial(args.device, args.baudrate))
+    try:
+        dev = serial.Serial(args.device, args.baudrate)
+    except serial.serialutil.SerialException:
+        sys.stderr.write("error opening %s\n" % args.device)
+        raise SystemExit(1)
+    term = Miniterm(dev)
     term.run()
 
