@@ -144,7 +144,11 @@ class Miniterm:
                     sys.stdout.write('\\x'+("0"+hex(ord(data))[2:])[-2:])
                 sys.stdout.flush()
         except Exception as e:
+            sys.stdout.write(color)
+            sys.stdout.flush()
             traceback.print_exc()
+            sys.stdout.write(g_color.reset)
+            sys.stdout.flush()
             self.console.cleanup()
             os._exit(1)
 
@@ -179,6 +183,8 @@ class Miniterm:
                     else:
                         self.serials[0].write(c)
         except Exception as e:
+            sys.stdout.write(g_color.reset)
+            sys.stdout.flush()
             traceback.print_exc()
             self.console.cleanup()
             os._exit(1)
