@@ -90,11 +90,15 @@ else:
 class Miniterm:
     """Normal interactive terminal"""
 
-    def __init__(self, serials, suppress_bytes = None):
+    def __init__(self,
+                 serials,
+                 suppress_bytes = None,
+                 transmit_all = False):
         self.serials = serials
         self.suppress_bytes = suppress_bytes or ""
         self.last_color = ""
         self.threads = []
+        self.transmit_all = transmit_all
 
     def start(self):
         self.alive = True
@@ -106,12 +110,9 @@ class Miniterm:
                 args = (serial, g_color.code(n))
                 ))
 
-        # console->serial, just the first device
+        # console->serial
         self.console = Console()
-        self.threads.append(threading.Thread(
-            target = self.writer,
-            args = (self.serials[0],)
-            ))
+        self.threads.append(threading.Thread(target = self.writer))
 
         # start all threads
         for thread in self.threads:
@@ -147,7 +148,7 @@ class Miniterm:
             self.console.cleanup()
             os._exit(1)
 
-    def writer(self, serial):
+    def writer(self):
         """loop and copy console->serial until ^C"""
         try:
             while self.alive:
@@ -171,7 +172,12 @@ class Miniterm:
                     # Don't send these bytes
                     continue
                 else:
-                    serial.write(c)                    # send character
+                    # send character
+                    if self.transmit_all:
+                        for serial in self.serials:
+                            serial.write(c)
+                    else:
+                        self.serials[0].write(c)
         except Exception as e:
             traceback.print_exc()
             self.console.cleanup()
@@ -210,13 +216,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = description,
                                      formatter_class = formatter)
 
+    parser.add_argument("device", metavar="DEVICE", nargs="+",
+                        help="serial device.  Specify DEVICE@BAUD for "
+                        "per-device baudrates.")
+
+    parser.add_argument("--all", "-a", action="store_true",
+                        help="Send keystrokes to all devices, not just "
+                        "the first one")
     parser.add_argument("--baudrate", "-b", metavar="BAUD", type=int,
                         help="baudrate for all devices", default=115200)
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Less verbose output")
-    parser.add_argument("device", metavar="DEVICE", nargs="+",
-                        help="serial device.  Specify DEVICE@BAUD for "
-                        "per-device baudrates.")
 
     args = parser.parse_args()
 
@@ -249,6 +259,6 @@ if __name__ == "__main__":
     if not args.quiet:
         print "^C to exit"
         print "----------"
-    term = Miniterm(devs)
+    term = Miniterm(devs, transmit_all = args.all)
     term.run()
 
