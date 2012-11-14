@@ -122,7 +122,11 @@ class Miniterm:
                 data = self.serial.read(1)
                 if not data:
                     continue
-                sys.stdout.write(data)
+                if ((ord(data) >= 32 and ord(data) < 128) or
+                    data == '\r' or data == '\n' or data == '\t'):
+                    sys.stdout.write(data)
+                else:
+                    sys.stdout.write('\\x'+("0"+hex(ord(data))[2:])[-2:])
                 sys.stdout.flush()
         except Exception as e:
             traceback.print_exc()
@@ -166,8 +170,8 @@ class Miniterm:
         self.start()
         self.join()
         print ""
-        self.console.cleanup()
         self.serial.timeout = saved_timeout
+        self.console.cleanup()
 
 if __name__ == "__main__":
     import argparse
@@ -211,7 +215,7 @@ if __name__ == "__main__":
 
     if not args.quiet:
         print color.reset + "^C to exit"
-        print color.reset + "--"
+        print color.reset + "----------"
     term = Miniterm(dev)
     term.run()
 
