@@ -8,6 +8,7 @@ import threading
 import traceback
 import time
 import re
+import signal
 
 class Color(object):
     def __init__(self):
@@ -52,7 +53,7 @@ if os.name == 'nt':
                         return '\n'
                     return z
 elif os.name == 'posix':
-    import termios, sys, os
+    import termios, select
     class Console:
         def __init__(self):
             self.fd = sys.stdin.fileno()
@@ -73,8 +74,15 @@ elif os.name == 'posix':
                 # ignore errors, so we can pipe stuff to this script
                 pass
         def getkey(self):
-            c = os.read(self.fd, 1)
-            return c
+            # Return -1 if we don't get input in 0.1 seconds, so that
+            # the main code can check the "alive" flag and respond to SIGINT.
+            [r, w, x] = select.select([self.fd], [], [self.fd], 0.1)
+            if r:
+                return os.read(self.fd, 1)
+            elif x:
+                return ''
+            else:
+                return -1
 else:
     raise ("Sorry, no terminal implementation for your platform (%s) "
            "available." % sys.platform)
@@ -104,7 +112,8 @@ class Miniterm:
 
     def join(self):
         for thread in self.threads:
-            thread.join()
+            while thread.isAlive():
+                thread.join(0.1)
 
     def reader(self):
         """loop and copy serial->console"""
@@ -131,6 +140,9 @@ class Miniterm:
                 if c == '\x03':
                     self.stop()
                     return
+                elif c == -1:
+                    # No input, try again
+                    continue
                 elif c == '':
                     # EOF on input.  Wait a tiny bit so we can
                     # flush the remaining input, then stop.
@@ -150,6 +162,7 @@ class Miniterm:
     def run(self):
         saved_timeout = self.serial.timeout
         self.serial.timeout = 0.1
+        signal.signal(signal.SIGINT, lambda *args: self.stop())
         self.start()
         self.join()
         print ""
