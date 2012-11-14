@@ -92,13 +92,17 @@ class Miniterm:
 
     def __init__(self,
                  serials,
-                 suppress_bytes = None,
-                 transmit_all = False):
+                 suppress_write_bytes = None,
+                 suppress_read_firstnull = True,
+                 transmit_all = False,
+                 add_cr = False):
         self.serials = serials
-        self.suppress_bytes = suppress_bytes or ""
+        self.suppress_write_bytes = suppress_write_bytes or ""
+        self.suppress_read_firstnull = suppress_read_firstnull
         self.last_color = ""
         self.threads = []
         self.transmit_all = transmit_all
+        self.add_cr = add_cr
 
     def start(self):
         self.alive = True
@@ -129,19 +133,33 @@ class Miniterm:
 
     def reader(self, serial, color):
         """loop and copy serial->console"""
+        first = True
         try:
             while self.alive:
                 data = serial.read(1)
                 if not data:
                     continue
+
+                # don't print a NULL if it's the first character we
+                # read.  This hides startup/port-opening glitches with
+                # some serial devices.
+                if self.suppress_read_firstnull and first and data == '\0':
+                    first = False
+                    continue
+                first = False
+
                 if color != self.last_color:
                     self.last_color = color
                     sys.stdout.write(color)
+
                 if ((ord(data) >= 32 and ord(data) < 128) or
                     data == '\r' or data == '\n' or data == '\t'):
                     sys.stdout.write(data)
+                    if self.add_cr and data == '\n':
+                        sys.stdout.write('\r')
                 else:
                     sys.stdout.write('\\x'+("0"+hex(ord(data))[2:])[-2:])
+
                 sys.stdout.flush()
         except Exception as e:
             sys.stdout.write(color)
@@ -172,7 +190,7 @@ class Miniterm:
                     time.sleep(0.25)
                     self.stop()
                     return
-                elif c in self.suppress_bytes:
+                elif c in self.suppress_write_bytes:
                     # Don't send these bytes
                     continue
                 else:
@@ -226,11 +244,13 @@ if __name__ == "__main__":
                         help="serial device.  Specify DEVICE@BAUD for "
                         "per-device baudrates.")
 
+    parser.add_argument("--crlf", "-c", action="store_true",
+                        help="add CR after incoming LF")
     parser.add_argument("--all", "-a", action="store_true",
                         help="Send keystrokes to all devices, not just "
                         "the first one")
     parser.add_argument("--baudrate", "-b", metavar="BAUD", type=int,
-                        help="baudrate for all devices", default=115200)
+                        help="default baudrate for all devices", default=115200)
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Less verbose output")
 
@@ -265,6 +285,8 @@ if __name__ == "__main__":
     if not args.quiet:
         print "^C to exit"
         print "----------"
-    term = Miniterm(devs, transmit_all = args.all)
+    term = Miniterm(devs,
+                    transmit_all = args.all,
+                    add_cr = args.crlf)
     term.run()
 
