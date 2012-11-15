@@ -75,8 +75,9 @@ else:
            "available." % sys.platform)
 
 class JimtermColor(object):
+    def __init__(self):
+        self.setup(1)
     def setup(self, total):
-        self.total = total
         if total > 1:
             self.codes = [
                 "\x1b[1;36m", # cyan
@@ -91,9 +92,8 @@ class JimtermColor(object):
         else:
             self.codes = [""]
             self.reset = ""
-            total = 1
     def code(self, n):
-        return self.codes[n % self.total]
+        return self.codes[n % len(self.codes)]
 
 class Jimterm:
     """Normal interactive terminal"""
