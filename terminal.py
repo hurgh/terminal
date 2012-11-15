@@ -104,6 +104,7 @@ class Jimterm:
                  suppress_read_firstnull = True,
                  transmit_all = False,
                  add_cr = False,
+                 raw = False,
                  color = True):
 
         self.color = JimtermColor()
@@ -117,6 +118,7 @@ class Jimterm:
         self.threads = []
         self.transmit_all = transmit_all
         self.add_cr = add_cr
+        self.raw = raw
 
     def print_header(self, nodes, bauds):
         for (n, (node, baud)) in enumerate(zip(nodes, bauds)):
@@ -174,7 +176,8 @@ class Jimterm:
                     self.last_color = color
                     sys.stdout.write(color)
 
-                if ((ord(data) >= 32 and ord(data) < 128) or
+                if (self.raw or
+                    (ord(data) >= 32 and ord(data) < 128) or
                     data == '\r' or data == '\n' or data == '\t'):
                     if self.add_cr and data == '\n':
                         sys.stdout.write('\r' + data)
@@ -265,18 +268,22 @@ if __name__ == "__main__":
                                      formatter_class = formatter)
 
     parser.add_argument("device", metavar="DEVICE", nargs="+",
-                        help="serial device.  Specify DEVICE@BAUD for "
+                        help="Serial device.  Specify DEVICE@BAUD for "
                         "per-device baudrates.")
 
+    parser.add_argument("--quiet", "-q", action="store_true",
+                        help="Less verbose output (omit header)")
+    parser.add_argument("--baudrate", "-b", metavar="BAUD", type=int,
+                        help="Default baudrate for all devices", default=115200)
     parser.add_argument("--crlf", "-c", action="store_true",
-                        help="add CR before incoming LF")
+                        help="Add CR before incoming LF")
     parser.add_argument("--all", "-a", action="store_true",
                         help="Send keystrokes to all devices, not just "
                         "the first one")
-    parser.add_argument("--baudrate", "-b", metavar="BAUD", type=int,
-                        help="default baudrate for all devices", default=115200)
-    parser.add_argument("--quiet", "-q", action="store_true",
-                        help="Less verbose output")
+    parser.add_argument("--mono", "-m", action="store_true",
+                        help="Don't use colors in output")
+    parser.add_argument("--raw", "-r", action="store_true",
+                        help="Don't escape unprintable characters")
 
     args = parser.parse_args()
 
@@ -306,7 +313,8 @@ if __name__ == "__main__":
     term = Jimterm(devs,
                    transmit_all = args.all,
                    add_cr = args.crlf,
-                   color = (os.name == "posix"))
+                   raw = args.raw,
+                   color = (os.name == "posix" and not args.mono))
     if not args.quiet:
         term.print_header(nodes, bauds)
     term.run()
