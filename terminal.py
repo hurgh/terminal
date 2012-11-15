@@ -1,5 +1,18 @@
 #!/usr/bin/python
-# Based on miniterm sample in pyserial
+
+# Jim Paris <jim@jtan.com>
+
+# Simple terminal program for serial devices.  Supports setting
+# baudrates and simple LF->CRLF mapping on input, but does not
+# configure flow control, carrier detection, etc.
+
+# ^C quits.  There is no escaping, so you can't currently send this
+# character to the remote host.  Piping input or output should work.
+
+# Supports multiple serial devices simultaneously.  When using more
+# than one, each device's output is in a different color.  Input
+# is directed to the first device, or can be sent to all devices
+# with --all.
 
 import sys
 import os
@@ -7,35 +20,9 @@ import serial
 import threading
 import traceback
 import time
-import re
 import signal
 
-class Color(object):
-    def __init__(self):
-        self.total = 1
-        self.codes = [""]
-        self.reset = ""
-    def setup(self, total):
-        self.total = total
-        # Initialize colorama, if needed for the total number of devices
-        # we have.  We avoid even loading colorama unless we need it.
-        if total > 1:
-            import colorama
-            colorama.init()
-            self.codes = [
-                colorama.Fore.CYAN + colorama.Style.BRIGHT,
-                colorama.Fore.YELLOW + colorama.Style.BRIGHT,
-                colorama.Fore.MAGENTA + colorama.Style.BRIGHT,
-                colorama.Fore.RED + colorama.Style.BRIGHT,
-                colorama.Fore.GREEN + colorama.Style.BRIGHT,
-                colorama.Fore.BLUE + colorama.Style.BRIGHT,
-                colorama.Fore.WHITE + colorama.Style.BRIGHT,
-                ]
-            self.reset = colorama.Style.RESET_ALL
-    def code(self, n):
-        return self.codes[n % self.total]
-g_color = Color()
-
+# Need OS-specific method for getting keyboard input.
 if os.name == 'nt':
     import msvcrt
     class Console:
@@ -59,11 +46,11 @@ elif os.name == 'posix':
             self.fd = sys.stdin.fileno()
             try:
                 self.old = termios.tcgetattr(self.fd)
-                new = termios.tcgetattr(self.fd)
-                new[3] = new[3] & ~termios.ICANON & ~termios.ECHO & ~termios.ISIG
-                new[6][termios.VMIN] = 1
-                new[6][termios.VTIME] = 0
-                termios.tcsetattr(self.fd, termios.TCSANOW, new)
+                tc = termios.tcgetattr(self.fd)
+                tc[3] = tc[3] & ~termios.ICANON & ~termios.ECHO & ~termios.ISIG
+                tc[6][termios.VMIN] = 1
+                tc[6][termios.VTIME] = 0
+                termios.tcsetattr(self.fd, termios.TCSANOW, tc)
             except termios.error:
                 # ignore errors, so we can pipe stuff to this script
                 pass
@@ -87,7 +74,28 @@ else:
     raise ("Sorry, no terminal implementation for your platform (%s) "
            "available." % sys.platform)
 
-class Miniterm:
+class JimtermColor(object):
+    def setup(self, total):
+        self.total = total
+        if total > 1:
+            self.codes = [
+                "\x1b[1;36m", # cyan
+                "\x1b[1;33m", # yellow
+                "\x1b[1;35m", # magenta
+                "\x1b[1;31m", # red
+                "\x1b[1;32m", # green
+                "\x1b[1;34m", # blue
+                "\x1b[1;37m", # white
+                ]
+            self.reset = "\x1b[0m"
+        else:
+            self.codes = [""]
+            self.reset = ""
+            total = 1
+    def code(self, n):
+        return self.codes[n % self.total]
+
+class Jimterm:
     """Normal interactive terminal"""
 
     def __init__(self,
@@ -95,7 +103,13 @@ class Miniterm:
                  suppress_write_bytes = None,
                  suppress_read_firstnull = True,
                  transmit_all = False,
-                 add_cr = False):
+                 add_cr = False,
+                 color = True):
+
+        self.color = JimtermColor()
+        if color:
+            self.color.setup(len(serials))
+
         self.serials = serials
         self.suppress_write_bytes = suppress_write_bytes or ""
         self.suppress_read_firstnull = suppress_read_firstnull
@@ -104,6 +118,14 @@ class Miniterm:
         self.transmit_all = transmit_all
         self.add_cr = add_cr
 
+    def print_header(self, nodes, bauds):
+        for (n, (node, baud)) in enumerate(zip(nodes, bauds)):
+            print (self.color.code(n)
+                   + node + ", " + str(baud) + " baud"
+                   + self.color.reset)
+        print "^C to exit"
+        print "----------"
+
     def start(self):
         self.alive = True
 
@@ -111,7 +133,7 @@ class Miniterm:
         for (n, serial) in enumerate(self.serials):
             self.threads.append(threading.Thread(
                 target = self.reader,
-                args = (serial, g_color.code(n))
+                args = (serial, self.color.code(n))
                 ))
 
         # console->serial
@@ -154,9 +176,10 @@ class Miniterm:
 
                 if ((ord(data) >= 32 and ord(data) < 128) or
                     data == '\r' or data == '\n' or data == '\t'):
-                    sys.stdout.write(data)
                     if self.add_cr and data == '\n':
-                        sys.stdout.write('\r')
+                        sys.stdout.write('\r' + data)
+                    else:
+                        sys.stdout.write(data)
                 else:
                     sys.stdout.write('\\x'+("0"+hex(ord(data))[2:])[-2:])
 
@@ -165,7 +188,7 @@ class Miniterm:
             sys.stdout.write(color)
             sys.stdout.flush()
             traceback.print_exc()
-            sys.stdout.write(g_color.reset)
+            sys.stdout.write(self.color.reset)
             sys.stdout.flush()
             self.console.cleanup()
             os._exit(1)
@@ -201,7 +224,7 @@ class Miniterm:
                     else:
                         self.serials[0].write(c)
         except Exception as e:
-            sys.stdout.write(g_color.reset)
+            sys.stdout.write(self.color.reset)
             sys.stdout.flush()
             traceback.print_exc()
             self.console.cleanup()
@@ -226,11 +249,12 @@ class Miniterm:
             serial.timeout = saved_timeouts[n]
 
         # Cleanup
-        print ""
+        print self.color.reset # and a newline
         self.console.cleanup()
 
 if __name__ == "__main__":
     import argparse
+    import re
 
     formatter = argparse.ArgumentDefaultsHelpFormatter
     description = ("Simple serial terminal that supports multiple devices.  "
@@ -245,7 +269,7 @@ if __name__ == "__main__":
                         "per-device baudrates.")
 
     parser.add_argument("--crlf", "-c", action="store_true",
-                        help="add CR after incoming LF")
+                        help="add CR before incoming LF")
     parser.add_argument("--all", "-a", action="store_true",
                         help="Send keystrokes to all devices, not just "
                         "the first one")
@@ -257,8 +281,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     devs = []
-    used_nodes = []
-    g_color.setup(len(args.device))
+    nodes = []
+    bauds = []
     for (n, device) in enumerate(args.device):
         m = re.search(r"^(.*)@([1-9][0-9]*)$", device)
         if m is not None:
@@ -267,26 +291,22 @@ if __name__ == "__main__":
         else:
             node = device
             baud = args.baudrate
-        if node in used_nodes:
-            sys.stderr.write("error: %s already open!\n" % node)
+        if node in nodes:
+            sys.stderr.write("error: %s specified more than once\n" % node)
             raise SystemExit(1)
         try:
             dev = serial.Serial(node, baud)
         except serial.serialutil.SerialException:
             sys.stderr.write("error opening %s\n" % node)
             raise SystemExit(1)
-        if not args.quiet:
-            print (g_color.code(n)
-                   + node + ", " + str(args.baudrate) + " baud"
-                   + g_color.reset)
-        used_nodes.append(node)
+        nodes.append(node)
+        bauds.append(baud)
         devs.append(dev)
 
+    term = Jimterm(devs,
+                   transmit_all = args.all,
+                   add_cr = args.crlf,
+                   color = (os.name == "posix"))
     if not args.quiet:
-        print "^C to exit"
-        print "----------"
-    term = Miniterm(devs,
-                    transmit_all = args.all,
-                    add_cr = args.crlf)
+        term.print_header(nodes, bauds)
     term.run()
-
